@@ -6,20 +6,20 @@ import { stamp } from './stamp.js';
 import { createApplier } from './apply.js';
 import { langOf } from './analyze.js';
 
-const CLIENT_ID = 'virtual:copyedit-client';
+const CLIENT_ID = 'virtual:directedit-client';
 const RESOLVED_CLIENT_ID = '\0' + CLIENT_ID;
 const CLIENT_FILE = fileURLToPath(new URL('./client.js', import.meta.url));
-const API = '/__copyedit';
+const API = '/__directedit';
 
 /**
  * @param {object} [options]
- * @param {string} [options.queueFile='.copyedits.md']  where unresolved edits go (relative to root)
+ * @param {string} [options.queueFile='.directedits.md']  where unresolved edits go (relative to root)
  * @param {string[]} [options.ignoreDirs]  extra directory names to skip when searching the project
  * @param {boolean} [options.injectClient=true]  add the overlay to served HTML pages
  * @param {string} [options.shortcut='alt+e']  keyboard shortcut that toggles edit mode
  */
-export default function copyedit(options = {}) {
-  const { queueFile = '.copyedits.md', ignoreDirs = [], injectClient = true, shortcut = 'alt+e' } = options;
+export default function directedit(options = {}) {
+  const { queueFile = '.directedits.md', ignoreDirs = [], injectClient = true, shortcut = 'alt+e' } = options;
   let root = process.cwd();
   let applier;
 
@@ -36,7 +36,7 @@ export default function copyedit(options = {}) {
   };
 
   return {
-    name: 'copyedit',
+    name: 'directedit',
     apply: 'serve',
     enforce: 'pre',
 
@@ -64,7 +64,7 @@ export default function copyedit(options = {}) {
             const results = await applier.apply(edits, { page });
             send(res, 200, { results, queueFile });
           } catch (err) {
-            server.config.logger.error(`[copyedit] ${err.stack || err}`);
+            server.config.logger.error(`[directedit] ${err.stack || err}`);
             send(res, 500, { error: String(err.message || err) });
           }
         });
@@ -113,4 +113,4 @@ function send(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
-export { copyedit };
+export { directedit };

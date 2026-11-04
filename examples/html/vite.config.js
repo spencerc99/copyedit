@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
-import copyedit from '@spencerc99/copyedit';
+import directedit from 'directedit';
 
 export default defineConfig({
-  plugins: [copyedit()],
+  plugins: [directedit()],
   build: { rollupOptions: { input: { main: resolve(import.meta.dirname, 'index.html'), about: resolve(import.meta.dirname, 'about/index.html') } } },
 });

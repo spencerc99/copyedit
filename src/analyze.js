@@ -12,7 +12,7 @@
 import { parse as babelParse } from '@babel/parser';
 import { parse as parseHtml } from 'parse5';
 
-export const ATTR = 'data-ce-src';
+export const ATTR = 'data-de-src';
 
 // Elements we never stamp: document scaffolding, non-visual, or framework-special.
 const SKIP_TAGS = new Set([

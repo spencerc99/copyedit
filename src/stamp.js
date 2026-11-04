@@ -1,4 +1,4 @@
-// Dev-only transform: add data-ce-src="file:line:col" to every stampable element.
+// Dev-only transform: add data-de-src="file:line:col" to every stampable element.
 import MagicString from 'magic-string';
 import { analyze, ATTR } from './analyze.js';
 

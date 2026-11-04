@@ -1,4 +1,4 @@
-{ "name": "copyedit-example-astro", "private": true, "type": "module",
+{ "name": "directedit-example-astro", "private": true, "type": "module",
   "scripts": { "dev": "astro dev" },
   "dependencies": { "astro": "*" },
-  "devDependencies": { "@spencerc99/copyedit": "file:../.." } }
+  "devDependencies": { "directedit": "file:../.." } }

@@ -7,7 +7,7 @@ import { stamp } from '../src/stamp.js';
 import { createApplier } from '../src/apply.js';
 
 function project(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'copyedit-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'directedit-'));
   for (const [rel, code] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
     fs.writeFileSync(path.join(root, rel), code);
@@ -18,15 +18,15 @@ function project(files) {
 
 const locOf = async (code, file, tag) => {
   const out = await stamp(code, file, file);
-  const m = new RegExp(`<${tag} data-ce-src="([^"]+)"`).exec(out.code);
+  const m = new RegExp(`<${tag} data-de-src="([^"]+)"`).exec(out.code);
   return m[1];
 };
 
 test('stamps intrinsic JSX elements only', async () => {
   const code = `export const A = () => <main><h1 className="t">Hi</h1><Button>Go</Button><>x</></main>`;
   const out = await stamp(code, '/p/src/A.tsx', 'src/A.tsx');
-  assert.match(out.code, /<main data-ce-src="src\/A\.tsx:1:24">/);
-  assert.match(out.code, /<h1 data-ce-src="src\/A\.tsx:1:30" className="t">/);
+  assert.match(out.code, /<main data-de-src="src\/A\.tsx:1:24">/);
+  assert.match(out.code, /<h1 data-de-src="src\/A\.tsx:1:30" className="t">/);
   assert.match(out.code, /<Button>Go<\/Button>/);
 });
 
@@ -70,7 +70,7 @@ test('ambiguous and dynamic text is queued with context', async () => {
     { id: 1, loc, before: 'Translated title', after: 'New title', context: { tag: 'h2', heading: 'Intro' } },
   ], { page: 'http://localhost:5173/' });
   assert.equal(res[0].status, 'queued');
-  const q = read('.copyedits.md');
+  const q = read('.directedits.md');
   assert.match(q, /## src\/X\.jsx:1:\d+ · <h2>/);
   assert.match(q, /- after: "New title"/);
   fs.rmSync(root, { recursive: true });
@@ -92,9 +92,9 @@ test('Astro: element text, frontmatter string, non-ASCII offsets', async () => {
   const src = `---\nconst title = "Héllo wörld 🎉";\n---\n<h1>{title}</h1>\n<p>Café ☕ time <b>now</b></p>\n`;
   const { read, applier } = project({ 'src/pages/index.astro': src });
   const out = await stamp(src, 'src/pages/index.astro', 'src/pages/index.astro');
-  assert.match(out.code, /<p data-ce-src="src\/pages\/index\.astro:5:1">Café/);
-  const h1 = /<h1 data-ce-src="([^"]+)"/.exec(out.code)[1];
-  const p = /<p data-ce-src="([^"]+)"/.exec(out.code)[1];
+  assert.match(out.code, /<p data-de-src="src\/pages\/index\.astro:5:1">Café/);
+  const h1 = /<h1 data-de-src="([^"]+)"/.exec(out.code)[1];
+  const p = /<p data-de-src="([^"]+)"/.exec(out.code)[1];
   const res = await applier.apply([
     { id: 1, loc: h1, before: 'Héllo wörld 🎉', after: 'Bonjour {monde}' },
     { id: 2, loc: p, before: 'Café ☕ time ', after: 'Tea 🍵 time ' },

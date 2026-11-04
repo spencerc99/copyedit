@@ -26,13 +26,13 @@ def edit_inline(page, locator, new_text):
 
 def edit_popover(page, locator, new_text):
     locator.click()
-    inp = page.locator("copyedit-ui").locator(".pop input")
+    inp = page.locator("directedit-ui").locator(".pop input")
     inp.fill(new_text)
     inp.press("Enter")
 
 
 def save(page):
-    with page.expect_response(lambda r: "/__copyedit/apply" in r.url) as resp:
+    with page.expect_response(lambda r: "/__directedit/apply" in r.url) as resp:
         page.keyboard.press("ControlOrMeta+s")
     return resp.value.json()
 
@@ -49,7 +49,7 @@ with sync_playwright() as p:
     page.goto("http://localhost:5171/")
     page.wait_for_selector("h1")
     page.keyboard.press("Alt+e")
-    check(page.evaluate("document.documentElement.hasAttribute('data-ce-on')"), "Alt+E turns edit mode on")
+    check(page.evaluate("document.documentElement.hasAttribute('data-de-on')"), "Alt+E turns edit mode on")
 
     edit_inline(page, page.locator("h1"), "Tiny tools for shared rooms")
     edit_inline(page, page.locator("nav a").first, "Read the long essay")
@@ -87,7 +87,7 @@ with sync_playwright() as p:
     page.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
     page.goto("http://localhost:5172/")
     page.wait_for_selector("h1")
-    page.locator("copyedit-ui").locator(".pill").click()
+    page.locator("directedit-ui").locator(".pill").click()
     lede = page.locator("p.lede")
     lede.click(position={"x": 2, "y": 8})
     page.keyboard.press("Home")
@@ -105,7 +105,7 @@ with sync_playwright() as p:
     check('<p class="lede">Ann &amp; Bo made this <em>with care</em> on a quiet afternoon.</p>' in html, "HTML text nodes rewritten around inline <em>")
     check('<button type="submit">Send it now</button>' in html, "button text rewritten")
     page.wait_for_timeout(1200)
-    check(page.locator("copyedit-ui").locator(".toast").is_visible(), "toast survives the full reload")
+    check(page.locator("directedit-ui").locator(".toast").is_visible(), "toast survives the full reload")
     page.screenshot(path=str(SHOTS / "html-saved.png"))
     page.close()
 
@@ -140,10 +140,10 @@ with sync_playwright() as p:
     data = save(page)
     print("   ", [(r["status"], r.get("reason")) for r in data["results"]])
     check(data["results"][0]["status"] == "queued", "dynamic text goes to the queue")
-    q = (ROOT / "react/.copyedits.md").read_text()
+    q = (ROOT / "react/.directedits.md").read_text()
     check("- after: \"1 joined\"" in q, "queue entry written")
     page.wait_for_timeout(300)
-    check(not page.locator("copyedit-ui").locator(".tray").is_visible(), "queued edit leaves the tray")
+    check(not page.locator("directedit-ui").locator(".tray").is_visible(), "queued edit leaves the tray")
     page.screenshot(path=str(SHOTS / "queue-toast.png"))
     page.close()
     browser.close()

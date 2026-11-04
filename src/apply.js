@@ -8,7 +8,7 @@
 //   3. any literal in the project             (<Button>Save</Button> in another file,
 //                                              data arrays, .md content, .json strings)
 // Anything that can't be pinned to exactly one literal is appended to a queue file
-// (.copyedits.md) with location context for a coding agent to pick up.
+// (.directedits.md) with location context for a coding agent to pick up.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,7 +18,7 @@ const DEFAULT_IGNORE_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', 'out', '.astro', '.next', '.nuxt', '.svelte-kit',
   '.vercel', '.netlify', '.turbo', '.cache', 'coverage', 'public',
 ]);
-const IGNORE_FILE = /^(readme|changelog|license|contributing|code_of_conduct)\b|^\.copyedits\.md$|\.config\.|^package(-lock)?\.json$|^tsconfig.*\.json$|\.lock$/i;
+const IGNORE_FILE = /^(readme|changelog|license|contributing|code_of_conduct)\b|^\.directedits\.md$|\.config\.|^package(-lock)?\.json$|^tsconfig.*\.json$|\.lock$/i;
 const MAX_FILES = 4000;
 
 export function parseLoc(loc) {
@@ -26,7 +26,7 @@ export function parseLoc(loc) {
   return m ? { rel: m[1], line: +m[2], col: +m[3] } : null;
 }
 
-export function createApplier({ root, queueFile = '.copyedits.md', ignoreDirs = [] } = {}) {
+export function createApplier({ root, queueFile = '.directedits.md', ignoreDirs = [] } = {}) {
   root = path.resolve(root);
   const ignore = new Set([...DEFAULT_IGNORE_DIRS, ...ignoreDirs]);
   const cache = new Map(); // abs path -> { mtime, code, analysis }
@@ -201,7 +201,7 @@ export function createApplier({ root, queueFile = '.copyedits.md', ignoreDirs = 
     let out = '';
     if (!fs.existsSync(qpath)) {
       out += '# Pending copy edits\n\n'
-        + '<!-- Written by copyedit. Agent: apply each edit to the source that renders it (follow the\n'
+        + '<!-- Written by directedit. Agent: apply each edit to the source that renders it (follow the\n'
         + '     location and any props/data it passes through), then delete that edit\'s section.\n'
         + '     Leave this header. -->\n';
     }

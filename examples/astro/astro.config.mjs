@@ -1,4 +1,4 @@
 import { defineConfig } from 'astro/config';
-import copyedit from '@spencerc99/copyedit/astro';
+import directedit from 'directedit/astro';
 
-export default defineConfig({ integrations: [copyedit()] });
+export default defineConfig({ integrations: [directedit()] });
