@@ -1,0 +1,52 @@
+{
+  "name": "copyedit",
+  "version": "0.1.0",
+  "description": "Edit the copy of your running site in the browser and write it straight back to source. Vite plugin + Astro integration.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Spencer Chang",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spencerc99/copyedit.git"
+  },
+  "homepage": "https://github.com/spencerc99/copyedit#readme",
+  "bugs": "https://github.com/spencerc99/copyedit/issues",
+  "exports": {
+    ".": "./src/vite.js",
+    "./vite": "./src/vite.js",
+    "./astro": "./src/astro.js",
+    "./client": "./src/client.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "vite-plugin",
+    "astro-integration",
+    "copy",
+    "contenteditable",
+    "designMode",
+    "ai",
+    "agent"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@babel/parser": "^8.1.0",
+    "magic-string": "^1.4.5",
+    "parse5": "^8.1.0",
+    "@astrojs/compiler": "^4.0.0"
+  },
+  "peerDependencies": {
+    "vite": ">=5"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
