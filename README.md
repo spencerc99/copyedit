@@ -8,12 +8,10 @@ Works with **Vite 5+** (React, plain HTML, anything JSX) and **Astro**. Dev-only
 
 ## Install
 
-copyedit isn't on npm yet. Install it straight from GitHub (there's no build step, so this is the real package):
-
 ```sh
-npm i -D github:spencerc99/copyedit
-# or: bun add -d github:spencerc99/copyedit
-# or: pnpm add -D github:spencerc99/copyedit
+npm i -D copyedit
+# or: bun add -d copyedit
+# or: pnpm add -D copyedit
 ```
 
 Then add it to your config.
@@ -62,7 +60,7 @@ export default { plugins: [copyedit && copyedit(), react()] };
 
 ### Using a local checkout
 
-If you're hacking on copyedit itself, point a project at your clone instead of the GitHub package:
+If you're hacking on copyedit itself, point a project at your clone instead of the npm package:
 
 ```sh
 git clone https://github.com/spencerc99/copyedit ~/Projects/copyedit
