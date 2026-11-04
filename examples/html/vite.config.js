@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
-import copyedit from 'copyedit';
+import copyedit from '@spencerc99/copyedit';
 
 export default defineConfig({
   plugins: [copyedit()],

@@ -9,9 +9,9 @@ Works with **Vite 5+** (React, plain HTML, anything JSX) and **Astro**. Dev-only
 ## Install
 
 ```sh
-npm i -D copyedit
-# or: bun add -d copyedit
-# or: pnpm add -D copyedit
+npm i -D @spencerc99/copyedit
+# or: bun add -d @spencerc99/copyedit
+# or: pnpm add -D @spencerc99/copyedit
 ```
 
 Then add it to your config.
@@ -20,7 +20,7 @@ Then add it to your config.
 
 ```js
 // vite.config.js
-import copyedit from 'copyedit';
+import copyedit from '@spencerc99/copyedit';
 import react from '@vitejs/plugin-react';
 
 export default { plugins: [copyedit(), react()] };
@@ -32,7 +32,7 @@ Put `copyedit()` before your framework plugin.
 
 ```js
 // astro.config.mjs
-import copyedit from 'copyedit/astro';
+import copyedit from '@spencerc99/copyedit/astro';
 
 export default { integrations: [copyedit()] };
 ```
@@ -49,7 +49,7 @@ To keep copyedit out of everyone's default dev server, load it only when an env 
 
 ```js
 // vite.config.js
-const copyedit = process.env.COPYEDIT ? (await import('copyedit')).default : null;
+const copyedit = process.env.COPYEDIT ? (await import('@spencerc99/copyedit')).default : null;
 
 export default { plugins: [copyedit && copyedit(), react()] };
 ```

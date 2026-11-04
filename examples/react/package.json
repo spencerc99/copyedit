@@ -1,4 +1,4 @@
 { "name": "copyedit-example-react", "private": true, "type": "module",
   "scripts": { "dev": "vite" },
   "dependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" },
-  "devDependencies": { "@vitejs/plugin-react": "*", "vite": "^8.3.5", "copyedit": "file:../.." } }
+  "devDependencies": { "@vitejs/plugin-react": "*", "vite": "^8.3.5", "@spencerc99/copyedit": "file:../.." } }
