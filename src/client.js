@@ -8,6 +8,10 @@ export function init(config = {}) {
   if (typeof window === 'undefined' || window.__directedit) return;
   const api = config.api || '/__directedit';
   const queueFile = config.queueFile || '.directedits.md';
+  // 'dev': Save writes to source through the dev server. 'preview': a deployed preview build
+  // with no server behind it, so Save copies a `directedit apply` command instead.
+  const mode = config.mode === 'preview' ? 'preview' : 'dev';
+  const saveLabel = mode === 'preview' ? 'Copy edits' : 'Save to source';
   const shortcut = parseShortcut(config.shortcut || 'alt+e');
   const ATTR = 'data-de-src';
   const STORE_KEY = 'directedit:on';
@@ -69,7 +73,7 @@ export function init(config = {}) {
 <div class="dock">
   <div class="toast"></div>
   <div class="tray">
-    <header><b class="count"></b><div class="actions"><button class="btn discard">Discard</button><button class="btn primary save">Save to source</button></div></header>
+    <header><b class="count"></b><div class="actions"><button class="btn discard">Discard</button><button class="btn primary save">${saveLabel}</button></div></header>
     <div class="list"></div>
   </div>
   <button class="pill" title="Toggle copy editing (${shortcut.label})"><span class="dot"></span><span class="label">Edit copy</span><kbd>${shortcut.label}</kbd></button>
@@ -449,9 +453,6 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
     if (state.editing) endEditing(false);
     const list = items();
     if (!list.length) return;
-    state.saving = true;
-    ui.save.setAttribute('disabled', '');
-    ui.save.textContent = 'Saving…';
     const edits = list.map((it, i) => ({
       id: i,
       kind: it.kind,
@@ -460,6 +461,10 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
       after: it.after,
       context: { tag: it.owner?.tagName.toLowerCase(), heading: it.owner && headingBefore(it.owner), text: it.owner?.textContent.trim().slice(0, 300) },
     }));
+    if (mode === 'preview') return copyEdits(list, edits);
+    state.saving = true;
+    ui.save.setAttribute('disabled', '');
+    ui.save.textContent = 'Saving…';
     try {
       const res = await fetch(`${api}/apply`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ edits, page: location.href }) });
       const data = await res.json();
@@ -480,9 +485,33 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
     } finally {
       state.saving = false;
       ui.save.removeAttribute('disabled');
-      ui.save.textContent = 'Save to source';
+      ui.save.textContent = saveLabel;
       render();
     }
+  }
+
+  async function copyEdits(list, edits) {
+    const p = config.preview || {};
+    const payload = {
+      v: 1,
+      branch: p.branch || null,
+      commit: p.commit || null,
+      root: p.root || '',
+      page: location.href,
+      edits: edits.map(({ id, context, ...e }) => ({ ...e, context: { tag: context.tag, heading: context.heading || undefined } })),
+    };
+    const text = formatApplyCommand(payload);
+    const ok = await copyText(text);
+    if (ok) {
+      // These edits now live on the clipboard; clear them so a second copy only carries new ones.
+      for (const it of list) {
+        if (it.kind === 'text') state.pending.delete(it.node);
+        it.owner?.removeAttribute('data-de-changed');
+      }
+      state.structural = [];
+      render();
+    }
+    toast({ copied: edits.length, ok, text, branch: p.branch }, false);
   }
 
   let toastTimer;
@@ -490,7 +519,29 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
     if (persist) { try { sessionStorage.setItem(TOAST_KEY, JSON.stringify({ ...t, at: Date.now() })); } catch {} }
     const el = ui.toast;
     el.textContent = '';
-    if (t.error) {
+    if (t.copied != null) {
+      const p = document.createElement('div');
+      if (t.ok) {
+        p.append(`Copied ${t.copied} edit${t.copied === 1 ? '' : 's'}. Paste into your coding agent, or into a terminal`);
+        if (t.branch) { const c = document.createElement('code'); c.textContent = t.branch; p.append(' on ', c); }
+        p.append('.');
+      } else {
+        p.textContent = "Couldn't reach the clipboard. Copy this instead:";
+      }
+      const row = document.createElement('div'); row.className = 'row';
+      if (t.ok) {
+        const again = document.createElement('button'); again.className = 'btn'; again.textContent = 'Copy again';
+        again.onclick = async () => { again.textContent = (await copyText(t.text)) ? 'Copied' : 'Copy failed'; };
+        row.append(again);
+        el.append(p, row);
+      } else {
+        const area = document.createElement('textarea');
+        area.readOnly = true; area.value = t.text;
+        area.style.cssText = 'width:100%;height:120px;margin-top:7px;font:11px/1.4 ui-monospace,Menlo,monospace;background:#2a2723;color:#f4f1ea;border:0;border-radius:6px;padding:6px;';
+        el.append(p, area);
+        requestAnimationFrame(() => { area.focus(); area.select(); });
+      }
+    } else if (t.error) {
       el.textContent = `Couldn't save: ${t.error}`;
     } else {
       const parts = [];
@@ -515,7 +566,7 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
     }
     el.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove('show'), t.queued || t.error ? 12000 : 4000);
+    toastTimer = setTimeout(() => el.classList.remove('show'), t.copied != null ? (t.ok ? 10000 : 60000) : t.queued || t.error ? 12000 : 4000);
   }
 
   // ------------------------------------------------------------- boot
@@ -549,4 +600,37 @@ function matches(e, s) {
 
 function clip(s, n = 140) {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {}
+  // Fallback for pages where the async clipboard API is blocked.
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.style.cssText = 'position:fixed;top:-1000px;opacity:0;';
+  document.body.appendChild(area);
+  area.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch {}
+  area.remove();
+  return ok;
+}
+
+/**
+ * The clipboard text for preview builds: one instruction line for an agent, then a shell
+ * command with the edits inline. Pasted into an agent it's a single tool call; pasted into a
+ * terminal it just runs. `directedit apply` also accepts this whole text on stdin.
+ */
+export function formatApplyCommand(payload) {
+  const { edits, ...head } = payload;
+  const n = edits.length;
+  const where = head.branch
+    ? `the preview of \`${head.branch}\`${head.commit ? ` (${String(head.commit).slice(0, 7)})` : ''}`
+    : 'a preview build';
+  const json = JSON.stringify(head).slice(0, -1) + ',"edits":[\n' + edits.map((e) => '  ' + JSON.stringify(e)).join(',\n') + '\n]}';
+  return `Apply ${n} copy edit${n === 1 ? '' : 's'} from ${where}. Run this command exactly as written from the repo root, then handle only the edits it reports as queued.\n\n`
+    + `npx directedit apply <<'DIRECTEDIT'\n${json}\nDIRECTEDIT\n`;
 }

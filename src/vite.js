@@ -1,10 +1,13 @@
-// Vite plugin: stamps source locations in dev, serves the overlay, writes edits back.
+// Vite plugin: stamps source locations, serves the overlay, and writes edits back.
+// In dev, Save writes straight to source. In preview builds (Cloudflare, Vercel, Netlify
+// previews), the same overlay ships with the build and Save copies a `directedit apply` command.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stamp } from './stamp.js';
 import { createApplier } from './apply.js';
 import { langOf } from './analyze.js';
+import { detectPreview, previewInfo } from './preview.js';
 
 const CLIENT_ID = 'virtual:directedit-client';
 const RESOLVED_CLIENT_ID = '\0' + CLIENT_ID;
@@ -17,11 +20,16 @@ const API = '/__directedit';
  * @param {string[]} [options.ignoreDirs]  extra directory names to skip when searching the project
  * @param {boolean} [options.injectClient=true]  add the overlay to served HTML pages
  * @param {string} [options.shortcut='alt+e']  keyboard shortcut that toggles edit mode
+ * @param {boolean | 'auto'} [options.preview='auto']  include the editor in builds: 'auto' turns it on
+ *   for preview deploys only (Cloudflare non-production branches, Vercel/Netlify previews)
+ * @param {string | string[]} [options.productionBranch]  branches never treated as previews (default main, master)
  */
 export default function directedit(options = {}) {
   const { queueFile = '.directedits.md', ignoreDirs = [], injectClient = true, shortcut = 'alt+e' } = options;
   let root = process.cwd();
   let applier;
+  let mode = 'dev';
+  let preview = null;
 
   const relTo = (abs) => path.relative(root, abs).split(path.sep).join('/');
   const shouldStamp = (id) => {
@@ -37,12 +45,24 @@ export default function directedit(options = {}) {
 
   return {
     name: 'directedit',
-    apply: 'serve',
     enforce: 'pre',
+    apply(_config, { command }) {
+      if (command === 'serve') return true;
+      return !!detectPreview({ preview: options.preview, productionBranch: options.productionBranch });
+    },
 
     configResolved(config) {
       root = config.root;
-      applier = createApplier({ root, queueFile, ignoreDirs });
+      if (config.command === 'build') {
+        mode = 'preview';
+        preview = previewInfo(detectPreview({ preview: true }), root);
+        if (!globalThis.__directeditLogged) {
+          globalThis.__directeditLogged = true;
+          config.logger.info(`[directedit] preview build for ${preview.branch || 'unknown branch'}: copy editing enabled`);
+        }
+      } else {
+        applier = createApplier({ root, queueFile, ignoreDirs });
+      }
     },
 
     configureServer(server) {
@@ -77,7 +97,9 @@ export default function directedit(options = {}) {
 
     load(id) {
       if (id === RESOLVED_CLIENT_ID) {
-        return `${fs.readFileSync(CLIENT_FILE, 'utf8')}\ninit(${JSON.stringify({ api: API, shortcut, queueFile, root })});`;
+        const config = { api: API, shortcut, queueFile, mode, preview };
+        if (mode === 'dev') config.root = root; // used to shorten Astro's absolute source paths
+        return `${fs.readFileSync(CLIENT_FILE, 'utf8')}\ninit(${JSON.stringify(config)});`;
       }
     },
 
@@ -98,10 +120,10 @@ export default function directedit(options = {}) {
           if (stamped) out = stamped.code;
         }
         if (!injectClient) return out;
-        return {
-          html: out,
-          tags: [{ tag: 'script', attrs: { type: 'module', src: `/@id/__x00__${CLIENT_ID}` }, injectTo: 'body' }],
-        };
+        const tag = mode === 'dev'
+          ? { tag: 'script', attrs: { type: 'module', src: `/@id/__x00__${CLIENT_ID}` }, injectTo: 'body' }
+          : { tag: 'script', attrs: { type: 'module' }, children: `import ${JSON.stringify(CLIENT_ID)};`, injectTo: 'body' };
+        return { html: out, tags: [tag] };
       },
     },
   };
