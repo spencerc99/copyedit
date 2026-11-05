@@ -71,6 +71,8 @@ npx directedit apply <<'DIRECTEDIT'
 DIRECTEDIT
 ````
 
+![Editing a paragraph on a playhtml.fun preview deploy, with the pending change listed in the corner](docs/preview-editing.png)
+
 Paste it wherever is handy:
 
 - **Into any coding agent** (Claude Code, Codex, Cursor, …). It's one shell call, and the agent doesn't need to open your files. The edits are applied by the same deterministic matcher as in dev, not by the model, so it's quick and cheap on any model. The agent only has to think about edits the command reports as queued.
