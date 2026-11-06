@@ -1,6 +1,6 @@
 {
   "name": "directedit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Edit the copy of your running site in the browser and write it back to source. Works on localhost and on preview deploys. Vite plugin + Astro integration.",
   "type": "module",
   "license": "MIT",

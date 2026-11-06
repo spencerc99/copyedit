@@ -233,6 +233,44 @@ function splitWs(raw) {
   return { lead, trail };
 }
 
+// If the original text was hard-wrapped across lines (common in JSX, HTML and Markdown that
+// a formatter like Prettier has touched), wrap the new text the same way: same indentation,
+// same line width (at least 80). Unchanged words then land on the same lines, so the diff
+// shows only what you actually edited.
+function rewrap(code, start, lead, text, width) {
+  const firstLineStart = code.lastIndexOf('\n', start + lead.length - 1) + 1;
+  const firstCol = start + lead.length - firstLineStart;
+  const indent = (code.slice(start + lead.length).split('\n')[1] || '').match(/^[ \t]*/)[0];
+  {
+    const words = text.split(/\s+/).filter(Boolean);
+    const out = [];
+    let line = '';
+    let col = firstCol;
+    for (const w of words) {
+      if (line && col + 1 + w.length > width) {
+        out.push(line);
+        line = w;
+        col = indent.length + w.length;
+      } else {
+        col += (line ? 1 : 0) + w.length;
+        line = line ? `${line} ${w}` : w;
+      }
+    }
+    out.push(line);
+    return out.join('\n' + indent);
+  }
+}
+
+function wrapLike(code, lit, raw, lead, trail, text) {
+  const inner = raw.slice(lead.length, raw.length - trail.length);
+  if (!inner.includes('\n')) return text;
+  const lineStart = code.lastIndexOf('\n', lit.start - 1) + 1;
+  const lineEnd = code.indexOf('\n', lit.end);
+  const span = code.slice(lineStart, lineEnd === -1 ? code.length : lineEnd);
+  const width = Math.max(80, ...span.split('\n').filter((l) => l.trim()).map((l) => l.length));
+  return rewrap(code, lit.start, lead, text, width);
+}
+
 export function replacement(code, lit, after) {
   const raw = code.slice(lit.start, lit.end);
   // Keep the file's style: if it already wrote &amp;, keep writing &amp;.
@@ -241,15 +279,17 @@ export function replacement(code, lit, after) {
   switch (lit.kind) {
     case 'jsxtext': {
       const { lead, trail } = splitWs(raw);
-      return lead + escapeHtmlText(after.trim()).replace(/[{}]/g, (c) => `{'${c}'}`) + trail;
+      const text = escapeHtmlText(after.trim()).replace(/[{}]/g, (c) => `{'${c}'}`);
+      return lead + wrapLike(code, lit, raw, lead, trail, text) + trail;
     }
     case 'html': {
       const { lead, trail } = splitWs(raw);
-      return lead + escapeHtmlText(after.trim()) + trail;
+      return lead + wrapLike(code, lit, raw, lead, trail, escapeHtmlText(after.trim())) + trail;
     }
     case 'astro': {
       const { lead, trail } = splitWs(raw);
-      return lead + escapeHtmlText(after.trim()).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;') + trail;
+      const text = escapeHtmlText(after.trim()).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;');
+      return lead + wrapLike(code, lit, raw, lead, trail, text) + trail;
     }
     case 'attr': {
       // HTML/JSX attribute values have no backslash escapes; use entities instead.
@@ -265,7 +305,7 @@ export function replacement(code, lit, after) {
     case 'json':
       return JSON.stringify(after);
     case 'md':
-      return after.trim();
+      return wrapLike(code, lit, raw, '', '', after.trim());
     default:
       return after;
   }

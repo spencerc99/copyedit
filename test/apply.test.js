@@ -153,3 +153,42 @@ test('Markdown: hard-wrapped paragraph', async () => {
   assert.equal(r.status, 'applied');
   assert.equal(read('src/content/a.md'), 'A shorter intro.\n');
 });
+
+test('hard-wrapped text is re-wrapped the same way, so only edited lines change', async () => {
+  const src = `export default () => (
+  <main>
+    <section>
+      <div>
+        <div>
+          <article>
+            <p>
+              One of my favorite things about walking around in the real world
+              is the causal sharing of space with other people. We share a look
+              when something funny happens or help out when a stranger trips.
+              Sometimes these spontaneous encounters become meaningful
+              encounters that stay with us.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+);
+`;
+  const { read, applier } = project({ 'src/App.tsx': src });
+  const loc = await locOf(src, 'src/App.tsx', 'p');
+  const before = 'One of my favorite things about walking around in the real world is the causal sharing of space with other people. We share a look when something funny happens or help out when a stranger trips. Sometimes these spontaneous encounters become meaningful encounters that stay with us.';
+  const [r] = await applier.apply([{ id: 1, loc, before, after: before + ' There is so much life around us!' }]);
+  assert.equal(r.status, 'applied');
+  const out = read('src/App.tsx');
+  const changed = out.split('\n').filter((l, i) => l !== src.split('\n')[i]);
+  assert.deepEqual(changed, ['              encounters that stay with us. There is so much life around us!']);
+});
+
+test('single-line text stays on one line', async () => {
+  const src = `export default () => <p>Short line here</p>;\n`;
+  const { read, applier } = project({ 'src/A.jsx': src });
+  const loc = await locOf(src, 'src/A.jsx', 'p');
+  await applier.apply([{ id: 1, loc, before: 'Short line here', after: 'A much longer line of text that goes well past eighty characters wide, for sure' }]);
+  assert.match(read('src/A.jsx'), /<p>A much longer line of text that goes well past eighty characters wide, for sure<\/p>/);
+});
