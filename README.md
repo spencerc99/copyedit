@@ -130,11 +130,17 @@ Run `npm i` in the directedit folder first; its parsers are loaded from there. R
 |---|---|
 | <kbd>Alt</kbd>+<kbd>E</kbd> or the pill in the corner | toggle edit mode |
 | click text | edit it in place |
+| hover, then <kbd>Delete</kbd> (or the **Remove** button) | remove that element |
+| hover, then <kbd>↑</kbd> / <kbd>↓</kbd> | widen the selection to the parent element, or narrow it back |
 | <kbd>Enter</kbd> / <kbd>Esc</kbd> | keep / revert this edit |
 | <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>S</kbd> | save all pending edits to source (on previews: copy them) |
 | hold <kbd>Alt</kbd> while clicking | click through to the page normally |
 
 While edit mode is on, the page's own click, submit and key handlers are paused, so you can edit a link or button label without following or pressing it. Buttons and other elements that can't hold a caret open a small inline field instead.
+
+Editing adds no visual chrome: the text keeps its exact layout (wrapping, spacing, no outline) while you type. Text sitting under a transparent layer, such as a canvas or an absolutely positioned overlay, or marked `user-select: none`, is still clickable in edit mode.
+
+Removing an element writes the removal to source when the element is plain markup that appears once on the page. Anything produced by code (a component's root element, a condition, a list item rendered from data) goes to `.directedits.md` instead, with the reason.
 
 ## How it maps back to source
 

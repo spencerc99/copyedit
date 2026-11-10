@@ -77,8 +77,9 @@ export async function apply(text, { cwd = process.cwd(), force = false, log = co
   log(`directedit: ${edits.length} edit${edits.length === 1 ? '' : 's'} from ${label}`);
   results.forEach((r, i) => {
     const e = edits[i];
-    if (r.status === 'applied') log(`  ✓ ${fromTop(r.file)}:${r.line}  ${short(e.before)} → ${short(e.after)}`);
-    else log(`  ↳ queued  ${short(e.before)} → ${short(e.after)}  (${r.reason})`);
+    const what = e.kind === 'delete' ? `removed <${e.context?.tag || 'element'}> ${short(e.before)}` : `${short(e.before)} → ${short(e.after)}`;
+    if (r.status === 'applied') log(`  ✓ ${fromTop(r.file)}:${r.line}  ${what}`);
+    else log(`  ↳ queued  ${what}  (${r.reason})`);
   });
   const applied = results.filter((r) => r.status === 'applied').length;
   const queued = results.length - applied;

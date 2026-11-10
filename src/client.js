@@ -22,6 +22,7 @@ export function init(config = {}) {
     editing: null, // { el, mode, snapshot: [{node, original}], textNode? }
     pending: new Map(), // Text -> { node, before, after, owner }
     structural: [], // [{ el, before, after }]
+    removed: [], // [{ el, before }]
     saving: false,
   };
 
@@ -35,6 +36,9 @@ export function init(config = {}) {
   :host { all: initial; }
   * { box-sizing: border-box; font: 12.5px/1.35 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
   .hover { position: fixed; pointer-events: none; border: 1.5px dashed #ff5a1f; border-radius: 3px; display: none; transition: all .06s ease-out; }
+  .del { all: unset; position: fixed; display: none; cursor: pointer; padding: 2px 7px; border-radius: 5px; background: #1d1b18; color: #f4f1ea; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,.25); white-space: nowrap; }
+  .del:hover { background: #ff5a1f; color: #1d1b18; }
+  .del kbd { opacity: .6; font-size: 10px; margin-left: 4px; }
   .dock { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; color: #f4f1ea; }
   .pill { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px 7px 10px; border-radius: 999px; background: #1d1b18; color: #f4f1ea; box-shadow: 0 2px 10px rgba(0,0,0,.25), inset 0 0 0 1px rgba(255,255,255,.08); user-select: none; }
   .pill:hover { background: #2a2723; }
@@ -69,6 +73,7 @@ export function init(config = {}) {
   .pop span { color: #a49e93; font-size: 11px; padding-right: 4px; }
 </style>
 <div class="hover"></div>
+<button class="del" title="Remove this element (Delete). ↑/↓ selects the parent/child.">Remove<kbd>⌫ ↑</kbd></button>
 <div class="pop"><input spellcheck="true" /><span>↵ save · esc</span></div>
 <div class="dock">
   <div class="toast"></div>
@@ -81,15 +86,16 @@ export function init(config = {}) {
   const $ = (s) => shadow.querySelector(s);
   const ui = {
     hover: $('.hover'), pill: $('.pill'), label: $('.pill .label'), tray: $('.tray'), list: $('.list'),
-    count: $('.count'), save: $('.save'), discard: $('.discard'), toast: $('.toast'), pop: $('.pop'), popInput: $('.pop input'),
+    count: $('.count'), save: $('.save'), discard: $('.discard'), toast: $('.toast'), pop: $('.pop'), popInput: $('.pop input'), del: $('.del'),
   };
 
   const pageStyle = document.createElement('style');
   pageStyle.textContent = `
 html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
-[data-de-editing] { outline: 2px solid #ff5a1f !important; outline-offset: 2px !important; border-radius: 2px; }
-[data-de-editing]:focus { outline: 2px solid #ff5a1f !important; }
-[data-de-changed] { text-decoration: underline wavy rgba(255, 90, 31, .7) !important; text-decoration-skip-ink: none !important; text-underline-offset: 3px !important; }
+[data-de-editing], [data-de-editing]:focus, [data-de-editing]:focus-visible { outline: none !important; }
+[data-de-changed]:not([data-de-editing]) { text-decoration: underline wavy rgba(255, 90, 31, .7) !important; text-decoration-skip-ink: none !important; text-underline-offset: 3px !important; }
+[data-de-removed] { display: none !important; }
+html[data-de-on]:not([data-de-alt]) body * { pointer-events: auto !important; }
 `;
 
   function mount() {
@@ -101,11 +107,6 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
   // ------------------------------------------------------------- helpers
 
   const inUI = (e) => e.composedPath().includes(host);
-  const supportsPlaintext = (() => {
-    const d = document.createElement('div');
-    try { d.contentEditable = 'plaintext-only'; } catch {}
-    return d.contentEditable === 'plaintext-only';
-  })();
 
   function directTextNodes(el) {
     return [...el.childNodes].filter((n) => n.nodeType === 3 && n.data.trim());
@@ -123,9 +124,43 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
     return el instanceof HTMLElement && directTextNodes(el).length ? el : null;
   }
 
+  // The text element under a point, even when something transparent (a canvas, an
+  // absolutely positioned layer) sits on top of it and swallows the pointer.
+  function textHit(node, x, y) {
+    const r = document.createRange();
+    r.selectNodeContents(node);
+    for (const rc of r.getClientRects()) {
+      if (x >= rc.left - 1 && x <= rc.right + 1 && y >= rc.top - 1 && y <= rc.bottom + 1) return true;
+    }
+    return false;
+  }
+  function textTargetAt(x, y) {
+    for (const el of document.elementsFromPoint(x, y)) {
+      if (el === host || !(el instanceof HTMLElement)) continue;
+      if (el.closest('svg, input, textarea, select, [contenteditable]:not([data-de-editing]), [data-de-removed]')) continue;
+      if (directTextNodes(el).some((n) => textHit(n, x, y))) return el;
+    }
+    return null;
+  }
+  function targetFor(e) {
+    const { clientX: x, clientY: y } = e;
+    const onText = textTargetAt(x, y);
+    if (onText) return onText;
+    // Not on a glyph (e.g. the blank end of a paragraph's last line): take the topmost
+    // text element whose box contains the point, looking through transparent layers.
+    for (const el of document.elementsFromPoint(x, y)) {
+      if (el === host || !(el instanceof HTMLElement)) continue;
+      const c = candidateFor(el);
+      if (!c) continue;
+      const r = c.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return c;
+    }
+    return null;
+  }
+
+  // Buttons and native controls can't hold a caret; edit those in a small field instead.
   function needsPopover(el) {
-    if (el.closest('button, summary, select, option')) return true;
-    try { return getComputedStyle(el).userSelect === 'none'; } catch { return false; }
+    return !!el.closest('button, summary, select, option');
   }
 
   const ownerOf = (node) => node.parentElement;
@@ -159,11 +194,38 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
     } else if (document.caretRangeFromPoint) {
       range = document.caretRangeFromPoint(x, y);
     }
-    if (!range || !el.contains(range.startContainer)) return;
+    if (!range || !el.contains(range.startContainer)) range = caretRangeIn(el, x, y);
+    if (!range) return;
     range.collapse(true);
     const sel = getSelection();
     sel.removeAllRanges();
     sel.addRange(range);
+  }
+
+  // Caret position inside el nearest to (x, y), measured from the text itself. Used when
+  // the browser can't hit-test the text because something covers it.
+  function caretRangeIn(el, x, y) {
+    let best = null;
+    let bestD = Infinity;
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const r = document.createRange();
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      const len = Math.min(n.data.length, 5000);
+      for (let i = 0; i < len; i++) {
+        r.setStart(n, i);
+        r.setEnd(n, i + 1);
+        const rc = r.getBoundingClientRect();
+        if (!rc.width && !rc.height) continue;
+        const dy = y < rc.top ? rc.top - y : y > rc.bottom ? y - rc.bottom : 0;
+        const dx = x < rc.left ? rc.left - x : x > rc.right ? x - rc.right : 0;
+        const d = dy * 1000 + dx;
+        if (d < bestD) { bestD = d; best = [n, x < (rc.left + rc.right) / 2 ? i : i + 1]; }
+      }
+    }
+    if (!best) return null;
+    const out = document.createRange();
+    out.setStart(best[0], best[1]);
+    return out;
   }
 
   // ------------------------------------------------------------- editing
@@ -176,10 +238,19 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
   }
 
   function startInline(el, point) {
-    const prev = { ce: el.getAttribute('contenteditable'), draggable: el.getAttribute('draggable'), spellcheck: el.getAttribute('spellcheck') };
+    const prev = { ce: el.getAttribute('contenteditable'), draggable: el.getAttribute('draggable'), spellcheck: el.getAttribute('spellcheck'), style: el.getAttribute('style') };
+    // contenteditable switches the element to white-space: pre-wrap, which turns the source's
+    // line breaks and indentation into visible space. Pin the page's own values instead.
+    const cs = getComputedStyle(el);
+    const pinned = KEEP_STYLES.map((k) => [k, cs.getPropertyValue(k)]);
     state.editing = { el, mode: 'inline', snapshot: snapshot(el), prev, blocks: new Set(el.querySelectorAll('br, div, p')) };
     el.setAttribute('data-de-editing', '');
-    el.contentEditable = supportsPlaintext ? 'plaintext-only' : 'true';
+    // Not 'plaintext-only': Chrome forces white-space: pre-wrap on it, which page styles can't
+    // override. Rich-text input (formatting, Enter, drops, rich paste) is blocked separately.
+    el.contentEditable = 'true';
+    for (const [k, v] of pinned) if (v) el.style.setProperty(k, v, 'important');
+    // Text marked user-select: none can't take a caret; allow it while editing.
+    for (const k of ['user-select', '-webkit-user-select']) el.style.setProperty(k, 'text', 'important');
     el.setAttribute('draggable', 'false');
     el.spellcheck = true;
     el.focus({ preventScroll: true });
@@ -222,6 +293,7 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
       if (ed.prev.ce == null) el.removeAttribute('contenteditable'); else el.setAttribute('contenteditable', ed.prev.ce);
       if (ed.prev.draggable == null) el.removeAttribute('draggable'); else el.setAttribute('draggable', ed.prev.draggable);
       if (ed.prev.spellcheck == null) el.removeAttribute('spellcheck'); else el.setAttribute('spellcheck', ed.prev.spellcheck);
+      if (ed.prev.style == null) el.removeAttribute('style'); else el.setAttribute('style', ed.prev.style);
       if (el.contains(document.activeElement) || document.activeElement === el) el.blur();
     } else {
       ui.pop.classList.remove('show');
@@ -231,6 +303,8 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
   }
 
   function record(ed) {
+    // With white-space: normal, browsers type spaces as non-breaking ones; store real spaces.
+    for (const s of ed.snapshot) if (s.node.data.includes('\u00a0') && !s.original.includes('\u00a0')) s.node.data = s.node.data.replace(/\u00a0/g, ' ');
     const known = new Set(ed.snapshot.map((s) => s.node));
     const added = [];
     const w = document.createTreeWalker(ed.el, NodeFilter.SHOW_TEXT);
@@ -275,14 +349,25 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
   function onPointerDown(e) {
     if (!state.on || inUI(e) || e.altKey || e.button !== 0) return;
     const ed = state.editing;
-    if (ed?.mode === 'inline' && ed.el.contains(e.target)) { e.stopPropagation(); return; }
+    const el = targetFor(e);
+    // Covered: something else is on top of the text, so the browser won't put the caret there.
+    const covered = el && !(e.target instanceof Node && el.contains(e.target));
+    if (ed?.mode === 'inline' && (ed.el.contains(e.target) || el === ed.el)) {
+      e.stopPropagation();
+      if (covered) { e.preventDefault(); placeCaret(e.clientX, e.clientY, ed.el); }
+      return;
+    }
     e.stopPropagation();
     if (ed) endEditing(false);
-    const el = candidateFor(e.target);
     if (!el) { e.preventDefault(); return; }
     if (needsPopover(el)) { e.preventDefault(); startPopover(el); return; }
     // Make it editable before the browser's default mousedown runs, so the caret lands where you clicked.
     startInline(el);
+    if (covered) {
+      e.preventDefault();
+      const { clientX: x, clientY: y } = e;
+      requestAnimationFrame(() => placeCaret(x, y, el));
+    }
   }
 
   function swallow(e) {
@@ -303,7 +388,7 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
 
   function onKeyDown(e) {
     if (matches(e, shortcut)) { e.preventDefault(); e.stopPropagation(); setOn(!state.on); return; }
-    if (inUI(e) && e.target === ui.popInput) {
+    if (inUI(e) && e.composedPath()[0] === ui.popInput) {
       e.stopPropagation();
       if (e.key === 'Enter') { e.preventDefault(); endEditing(false); }
       else if (e.key === 'Escape') { e.preventDefault(); endEditing(true); }
@@ -323,8 +408,28 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
       else if (e.key === 'Escape') { e.preventDefault(); endEditing(true); }
       return;
     }
+    if (hoverEl && (e.key === 'Backspace' || e.key === 'Delete')) { e.preventDefault(); e.stopPropagation(); removeEl(hoverEl); return; }
+    if (hoverEl && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'ArrowUp') {
+        const up = hoverEl.parentElement;
+        if (up && up !== document.body && up !== document.documentElement) { hoverTrail.push(hoverEl); hoverEl = up; }
+      } else if (hoverTrail.length) {
+        hoverEl = hoverTrail.pop();
+      }
+      positionHover();
+      return;
+    }
     if (e.key === 'Escape') { e.preventDefault(); setOn(false); }
   }
+
+  function trackAlt(e) {
+    document.documentElement.toggleAttribute('data-de-alt', state.on && e.altKey);
+  }
+  window.addEventListener('keydown', trackAlt, { capture: true });
+  window.addEventListener('keyup', trackAlt, { capture: true });
+  window.addEventListener('blur', () => document.documentElement.removeAttribute('data-de-alt'));
 
   function guardKeys(e) {
     if (state.on && state.editing?.mode === 'inline' && !inUI(e)) { e.stopPropagation(); e.stopImmediatePropagation(); }
@@ -355,19 +460,54 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
   ui.popInput.addEventListener('blur', () => { if (state.editing?.mode === 'popover') endEditing(false); });
 
   let hoverEl = null;
+  let hoverBase = null;
+  let hoverTrail = [];
   function onMove(e) {
     if (!state.on || state.editing?.mode === 'popover') return;
-    if (inUI(e) || e.altKey) return hideHover();
-    const el = candidateFor(e.target);
-    if (el === state.editing?.el) return hideHover();
-    if (el !== hoverEl) { hoverEl = el; positionHover(); }
+    if (inUI(e)) { if (e.composedPath().includes(ui.del)) return; return hideHover(); }
+    if (e.altKey) return hideHover();
+    const el = targetFor(e);
+    if (el && el === state.editing?.el) return hideHover();
+    if (el === hoverBase) return;
+    // Moving within the element the arrow keys widened to keeps that selection.
+    if (el && hoverEl && hoverEl !== hoverBase && hoverEl.contains(el)) return;
+    hoverBase = el;
+    hoverEl = el;
+    hoverTrail = [];
+    positionHover();
   }
   function positionHover() {
     if (!hoverEl || !hoverEl.isConnected) return hideHover();
     const r = hoverEl.getBoundingClientRect();
     Object.assign(ui.hover.style, { display: 'block', top: `${r.top - 3}px`, left: `${r.left - 3}px`, width: `${r.width + 6}px`, height: `${r.height + 6}px` });
+    const top = r.top - 22 < 4 ? r.bottom + 4 : r.top - 22;
+    Object.assign(ui.del.style, { display: 'block', top: `${top}px`, left: `${Math.max(4, Math.min(r.right - 90, innerWidth - 100))}px` });
   }
-  function hideHover() { hoverEl = null; ui.hover.style.display = 'none'; }
+  function hideHover() { hoverEl = null; hoverBase = null; hoverTrail = []; ui.hover.style.display = 'none'; ui.del.style.display = 'none'; }
+  ui.del.addEventListener('click', (e) => { e.stopPropagation(); if (hoverEl) removeEl(hoverEl); });
+
+  // An element's own source location (not an ancestor's), and how many copies of it the page shows.
+  function selfLocInfo(el) {
+    if (el.hasAttribute(ATTR)) {
+      const v = el.getAttribute(ATTR);
+      return { loc: v, copies: document.querySelectorAll(`[${ATTR}="${CSS.escape(v)}"]`).length };
+    }
+    if (el.hasAttribute('data-astro-source-loc')) {
+      const file = el.getAttribute('data-astro-source-file');
+      const at = el.getAttribute('data-astro-source-loc');
+      const copies = [...document.querySelectorAll(`[data-astro-source-loc="${CSS.escape(at)}"]`)].filter((x) => x.getAttribute('data-astro-source-file') === file).length;
+      return { ...locInfo(el), copies };
+    }
+    return { loc: null, copies: 1 };
+  }
+
+  function removeEl(el) {
+    if (state.editing && (el === state.editing.el || el.contains(state.editing.el))) endEditing(true);
+    el.setAttribute('data-de-removed', '');
+    state.removed.push({ el, before: el.textContent.replace(/\s+/g, ' ').trim() });
+    hideHover();
+    render();
+  }
 
   const opts = { capture: true };
   for (const t of ['pointerdown']) window.addEventListener(t, onPointerDown, opts);
@@ -392,17 +532,19 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
     ui.label.textContent = on ? 'Editing copy' : 'Edit copy';
     if (!on) hideHover();
   }
+  const KEEP_STYLES = ['white-space', 'white-space-collapse', 'text-wrap-mode', 'line-break', 'overflow-wrap', 'word-break'];
 
   ui.pill.addEventListener('click', () => setOn(!state.on));
   ui.save.addEventListener('click', () => save());
   ui.discard.addEventListener('click', () => discardAll());
 
-  const pendingCount = () => state.pending.size + state.structural.length;
+  const pendingCount = () => state.pending.size + state.structural.length + state.removed.length;
 
   function items() {
     return [
       ...[...state.pending.values()].map((p) => ({ ...p, kind: 'text', el: p.owner })),
       ...state.structural.map((s) => ({ ...s, kind: 'structure', owner: s.el, ref: s })),
+      ...state.removed.map((r) => ({ ...r, kind: 'delete', owner: r.el, after: '', ref: r })),
     ];
   }
 
@@ -415,11 +557,13 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
       const row = document.createElement('div');
       row.className = 'item';
       const b = document.createElement('div'); b.className = 'b'; b.textContent = clip(it.before.trim());
-      const a = document.createElement('div'); a.className = 'a'; a.textContent = clip(it.after.trim()) || '(empty)';
-      const w = document.createElement('div'); w.className = 'w'; w.textContent = locOf(it.owner) || 'no source location';
+      const a = document.createElement('div'); a.className = 'a';
+      a.textContent = it.kind === 'delete' ? `removed <${it.owner.tagName.toLowerCase()}>` : clip(it.after.trim()) || '(empty)';
+      const w = document.createElement('div'); w.className = 'w';
+      w.textContent = (it.kind === 'delete' ? selfLocInfo(it.owner).loc : locOf(it.owner)) || 'no source location';
       const x = document.createElement('button'); x.className = 'x'; x.textContent = '×'; x.title = 'Undo this change';
       x.onclick = (ev) => { ev.stopPropagation(); undo(it); };
-      row.onclick = () => { it.owner?.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
+      row.onclick = () => { if (it.kind !== 'delete') it.owner?.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
       row.append(b, x, a, w);
       ui.list.append(row);
     }
@@ -429,6 +573,9 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
     if (it.kind === 'text') {
       it.node.data = it.before;
       state.pending.delete(it.node);
+    } else if (it.kind === 'delete') {
+      it.owner.removeAttribute('data-de-removed');
+      state.removed = state.removed.filter((r) => r !== it.ref);
     } else {
       state.structural = state.structural.filter((s) => s !== it.ref);
     }
@@ -438,7 +585,7 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
 
   function discardAll() {
     if (state.editing) endEditing(true);
-    for (const it of items()) if (it.kind === 'text') undo(it);
+    for (const it of items()) if (it.kind === 'text' || it.kind === 'delete') undo(it);
     if (state.structural.length) {
       // Structural edits can't be cleanly reverted in place; reload to restore the page.
       state.structural = [];
@@ -453,14 +600,22 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
     if (state.editing) endEditing(false);
     const list = items();
     if (!list.length) return;
-    const edits = list.map((it, i) => ({
-      id: i,
-      kind: it.kind,
-      ...locInfo(it.owner),
-      before: it.before,
-      after: it.after,
-      context: { tag: it.owner?.tagName.toLowerCase(), heading: it.owner && headingBefore(it.owner), text: it.owner?.textContent.trim().slice(0, 300) },
-    }));
+    const edits = list.map((it, i) => {
+      const self = it.kind === 'delete' ? selfLocInfo(it.owner) : null;
+      return {
+        id: i,
+        kind: it.kind,
+        ...(self ? { loc: self.loc, locMode: self.locMode } : locInfo(it.owner)),
+        before: it.kind === 'delete' ? it.before.slice(0, 300) : it.before,
+        after: it.after,
+        context: {
+          tag: it.owner?.tagName.toLowerCase(),
+          heading: it.owner && headingBefore(it.owner),
+          text: it.kind === 'delete' ? undefined : it.owner?.textContent.trim().slice(0, 300),
+          copies: self ? self.copies : undefined,
+        },
+      };
+    });
     if (mode === 'preview') return copyEdits(list, edits);
     state.saving = true;
     ui.save.setAttribute('disabled', '');
@@ -473,6 +628,7 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
       list.forEach((it, i) => {
         if (!done.has(i)) return;
         if (it.kind === 'text') state.pending.delete(it.node);
+        else if (it.kind === 'delete') state.removed = state.removed.filter((r) => r !== it.ref);
         else state.structural = state.structural.filter((s) => s !== it.ref);
         it.owner?.removeAttribute('data-de-changed');
       });
@@ -509,6 +665,7 @@ html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
         it.owner?.removeAttribute('data-de-changed');
       }
       state.structural = [];
+      state.removed = [];
       render();
     }
     toast({ copied: edits.length, ok, text, branch: p.branch }, false);

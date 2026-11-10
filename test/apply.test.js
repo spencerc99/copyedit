@@ -192,3 +192,53 @@ test('single-line text stays on one line', async () => {
   await applier.apply([{ id: 1, loc, before: 'Short line here', after: 'A much longer line of text that goes well past eighty characters wide, for sure' }]);
   assert.match(read('src/A.jsx'), /<p>A much longer line of text that goes well past eighty characters wide, for sure<\/p>/);
 });
+
+test('delete: removes a JSX child element and its line', async () => {
+  const src = `export default () => (\n  <main>\n    <h1>Title</h1>\n    <p>Remove me</p>\n    <p>Keep me</p>\n  </main>\n);\n`;
+  const { read, applier } = project({ 'src/App.jsx': src });
+  const loc = await locOf(src, 'src/App.jsx', 'p');
+  const [r] = await applier.apply([{ id: 1, kind: 'delete', loc, before: 'Remove me', after: '', context: { tag: 'p', copies: 1 } }]);
+  assert.equal(r.status, 'applied');
+  assert.equal(read('src/App.jsx'), `export default () => (\n  <main>\n    <h1>Title</h1>\n    <p>Keep me</p>\n  </main>\n);\n`);
+});
+
+test('delete: inline element keeps the rest of the line', async () => {
+  const html = `<!doctype html>\n<html><body>\n<p class="x">Hello <em>there</em> world</p>\n</body></html>\n`;
+  const { read, applier } = project({ 'index.html': html });
+  const loc = await locOf(html, 'index.html', 'em');
+  const [r] = await applier.apply([{ id: 1, kind: 'delete', loc, before: 'there', after: '', context: { tag: 'em' } }]);
+  assert.equal(r.status, 'applied');
+  assert.match(read('index.html'), /<p class="x">Hello world<\/p>/);
+});
+
+test('delete: refuses component roots, list items, and repeated elements', async () => {
+  const src = `export const A = () => <section><ul>{xs.map((x) => <li>{x}</li>)}</ul></section>;\n`;
+  const { read, applier } = project({ 'src/A.jsx': src });
+  const root = await locOf(src, 'src/A.jsx', 'section');
+  const li = await locOf(src, 'src/A.jsx', 'li');
+  const ul = await locOf(src, 'src/A.jsx', 'ul');
+  const res = await applier.apply([
+    { id: 1, kind: 'delete', loc: root, before: 'x', after: '', context: { tag: 'section' } },
+    { id: 2, kind: 'delete', loc: li, before: 'x', after: '', context: { tag: 'li' } },
+    { id: 3, kind: 'delete', loc: ul, before: 'x', after: '', context: { tag: 'ul', copies: 2 } },
+  ]);
+  assert.deepEqual(res.map((r) => r.status), ['queued', 'queued', 'queued']);
+  assert.equal(read('src/A.jsx'), src);
+  assert.match(read('.directedits.md'), /- action: remove this <li> from the page/);
+});
+
+test('delete: Astro element via after-open-tag loc', async () => {
+  const src = `---\n---\n<div>\n  <p>Gone</p>\n  <p>Stays</p>\n</div>\n`;
+  const { read, applier } = project({ 'src/pages/index.astro': src });
+  const [r] = await applier.apply([{ id: 1, kind: 'delete', loc: 'src/pages/index.astro:4:6', locMode: 'after-open-tag', before: 'Gone', after: '', context: { tag: 'p' } }]);
+  assert.equal(r.status, 'applied');
+  assert.equal(read('src/pages/index.astro'), `---\n---\n<div>\n  <p>Stays</p>\n</div>\n`);
+});
+
+test('delete: no double blank line left behind', async () => {
+  const src = `export default () => (\n  <main>\n    <h1>Title</h1>\n\n    <p>Remove me</p>\n\n    <p>Keep me</p>\n  </main>\n);\n`;
+  const { read, applier } = project({ 'src/App.jsx': src });
+  const loc = await locOf(src, 'src/App.jsx', 'p');
+  await applier.apply([{ id: 1, kind: 'delete', loc, before: 'Remove me', after: '', context: { tag: 'p' } }]);
+  assert.equal(read('src/App.jsx'), `export default () => (\n  <main>\n    <h1>Title</h1>\n\n    <p>Keep me</p>\n  </main>\n);\n`);
+});

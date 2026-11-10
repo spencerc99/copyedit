@@ -132,7 +132,10 @@ function analyzeBabel(code, lang, base = 0, lc, out) {
         }
         const { line, col } = lc(start);
         const alreadyStamped = node.openingElement.attributes.some((a) => a.name?.name === ATTR);
-        out.elements.push({ tag: name.name, start, nameEnd: base + name.end, line, col, textChildren, alreadyStamped });
+        // Only a JSX child can be removed as plain text; a returned root or an element inside
+        // {cond && …} / .map(…) is code, not markup.
+        const deletable = parent?.type === 'JSXElement' || parent?.type === 'JSXFragment';
+        out.elements.push({ tag: name.name, start, end: base + node.end, nameEnd: base + name.end, line, col, textChildren, alreadyStamped, deletable });
       }
     } else if (node.type === 'JSXText') {
       if (norm(node.value)) out.literals.push({ kind: 'jsxtext', start: base + node.start, end: base + node.end, value: node.value });
@@ -194,8 +197,9 @@ function analyzeHtml(code, lc, out) {
         }
         const { line, col } = lc(start);
         out.elements.push({
-          tag: child.tagName, start, nameEnd: start + 1 + child.tagName.length, line, col, textChildren,
+          tag: child.tagName, start, end: loc.endOffset, nameEnd: start + 1 + child.tagName.length, line, col, textChildren,
           alreadyStamped: (child.attrs || []).some((a) => a.name === ATTR),
+          deletable: !isRaw,
         });
       }
       visit(child, isRaw);
@@ -235,7 +239,7 @@ async function analyzeAstro(code, lc, out) {
     return { kind: 'astro', start, end, value: decodeEntities(code.slice(start, end)) };
   };
 
-  const visit = (node, inExpression) => {
+  const visit = (node, inExpression, underExpression = false) => {
     for (const child of node.children || []) {
       if (child.type === 'frontmatter') {
         const start = toChar(child.position.start.offset) + 3; // skip the opening ---
@@ -263,14 +267,16 @@ async function analyzeAstro(code, lc, out) {
             .filter((t) => t.type === 'text' && t.position && norm(t.value))
             .map(textLit);
           const { line, col } = lc(start);
+          const end = child.position.end ? toChar(child.position.end.offset) : null;
           out.elements.push({
-            tag: child.name, start, nameEnd: start + 1 + child.name.length, line, col, textChildren,
+            tag: child.name, start, end, nameEnd: start + 1 + child.name.length, line, col, textChildren,
             alreadyStamped: (child.attributes || []).some((a) => a.name === ATTR),
+            deletable: !underExpression && end != null,
           });
         }
       }
       const skipChildren = child.type === 'element' && /^(script|style)$/.test(child.name);
-      if (!skipChildren) visit(child, child.type === 'expression');
+      if (!skipChildren) visit(child, child.type === 'expression', underExpression || child.type === 'expression');
     }
   };
   visit(ast, false);

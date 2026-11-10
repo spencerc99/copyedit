@@ -95,7 +95,52 @@ export function createApplier({ root, queueFile = '.directedits.md', ignoreDirs 
     return out;
   }
 
+  function findElement(entry, loc, locMode) {
+    if (locMode === 'after-open-tag') {
+      // Astro's data-astro-source-loc: the position just after the opening tag.
+      const starts = [0];
+      for (let i = 0; i < entry.code.length; i++) if (entry.code.charCodeAt(i) === 10) starts.push(i + 1);
+      const idx = (starts[loc.line - 1] ?? Infinity) + loc.col - 1;
+      return entry.analysis.elements.filter((e) => e.start < idx).sort((a, b) => b.start - a.start)[0];
+    }
+    return entry.analysis.elements.find((e) => e.line === loc.line && e.col === loc.col);
+  }
+
+  // Removing an element: cut its source range, and the whole line(s) when it sits on its own.
+  async function resolveDelete(edit) {
+    const loc = parseLoc(edit.loc);
+    if (!loc) return { reason: 'the element has no source location (Astro preview builds and some generated markup), so it has to be removed by hand' };
+    const copies = edit.context?.copies ?? 1;
+    if (copies > 1) return { reason: `this element appears ${copies} times on the page, so it's probably rendered from a list; remove the item from its data instead` };
+    const abs = path.resolve(root, loc.rel);
+    if (!inRoot(abs) || !fs.existsSync(abs)) return { reason: `${loc.rel} isn't in this project` };
+    const entry = await load(abs);
+    const el = findElement(entry, loc, edit.locMode);
+    if (!el || el.end == null) return { reason: `couldn't find the element at ${edit.loc}` };
+    if (el.tag !== edit.context?.tag && edit.context?.tag) return { reason: `the source at ${edit.loc} is a <${el.tag}>, not the <${edit.context.tag}> on the page; the file may have changed since` };
+    if (!el.deletable) return { reason: 'this element is produced by code (a component\'s root, a condition or a loop), not plain markup, so removing it needs a code change' };
+    const code = entry.code;
+    let start = el.start;
+    let end = el.end;
+    const lineStart = code.lastIndexOf('\n', start - 1) + 1;
+    let lineEnd = code.indexOf('\n', end);
+    if (lineEnd === -1) lineEnd = code.length;
+    if (!code.slice(lineStart, start).trim() && !code.slice(end, lineEnd).trim()) {
+      start = lineStart;
+      end = Math.min(code.length, lineEnd + 1);
+      // Don't leave two blank lines where the element used to sit between them.
+      const prevLine = code.slice(code.lastIndexOf('\n', Math.max(0, start - 2)) + 1, Math.max(0, start - 1));
+      const nextEnd = code.indexOf('\n', end);
+      const nextLine = code.slice(end, nextEnd === -1 ? code.length : nextEnd);
+      if (start > 0 && !prevLine.trim() && !nextLine.trim() && nextEnd !== -1) end = nextEnd + 1;
+    } else if (code[start - 1] === ' ' && code[end] === ' ') {
+      end += 1; // "Hello <em>there</em> world" -> "Hello world"
+    }
+    return { file: abs, lit: { kind: 'delete', start, end, value: code.slice(el.start, el.end) }, via: 'element' };
+  }
+
   async function resolve(edit) {
+    if (edit.kind === 'delete') return resolveDelete(edit);
     const loc = parseLoc(edit.loc);
     const before = edit.before ?? '';
     if (!norm(before)) return { reason: 'the original text was empty or whitespace' };
@@ -110,16 +155,7 @@ export function createApplier({ root, queueFile = '.directedits.md', ignoreDirs 
     // 1 + 2: the owning element, then its file
     if (ownerFile) {
       const entry = await load(ownerFile);
-      let el;
-      if (edit.locMode === 'after-open-tag') {
-        // Astro's data-astro-source-loc: the position just after the opening tag.
-        const starts = [0];
-        for (let i = 0; i < entry.code.length; i++) if (entry.code.charCodeAt(i) === 10) starts.push(i + 1);
-        const idx = (starts[loc.line - 1] ?? Infinity) + loc.col - 1;
-        el = entry.analysis.elements.filter((e) => e.start < idx).sort((a, b) => b.start - a.start)[0];
-      } else {
-        el = entry.analysis.elements.find((e) => e.line === loc.line && e.col === loc.col);
-      }
+      const el = findElement(entry, loc, edit.locMode);
       if (el) {
         const m = matchLiterals(el.textChildren, before);
         if (m.length === 1) return { file: ownerFile, lit: m[0], via: 'element' };
@@ -214,8 +250,13 @@ export function createApplier({ root, queueFile = '.directedits.md', ignoreDirs 
       if (candidates?.length) {
         out += `- candidates: ${candidates.slice(0, 6).map((h) => `${rel(h.file)}:${lineIndex(cache.get(h.file)?.code ?? '')(h.lit.start).line}`).join(', ')}\n`;
       }
-      out += `- before: ${JSON.stringify(edit.before)}\n`;
-      out += `- after: ${JSON.stringify(edit.after)}\n`;
+      if (edit.kind === 'delete') {
+        out += `- action: remove this <${c.tag || 'element'}> from the page\n`;
+        out += `- its text: ${JSON.stringify(edit.before)}\n`;
+      } else {
+        out += `- before: ${JSON.stringify(edit.before)}\n`;
+        out += `- after: ${JSON.stringify(edit.after)}\n`;
+      }
       if (c.text && c.text !== edit.before) out += `- element text now: ${JSON.stringify(c.text)}\n`;
     }
     fs.appendFileSync(qpath, out);
@@ -277,6 +318,8 @@ export function replacement(code, lit, after) {
   const strictAmp = /&amp;/.test(raw);
   const escapeHtmlText = (s) => (strictAmp ? s.replace(/&/g, '&amp;') : s.replace(/&(?=[#\w]+;)/g, '&amp;')).replace(/</g, '&lt;').replace(/>/g, '&gt;');
   switch (lit.kind) {
+    case 'delete':
+      return '';
     case 'jsxtext': {
       const { lead, trail } = splitWs(raw);
       const text = escapeHtmlText(after.trim()).replace(/[{}]/g, (c) => `{'${c}'}`);
