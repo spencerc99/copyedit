@@ -33,16 +33,27 @@ with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=os.environ.get("CHROME_PATH") or None)
     ctx = browser.new_context(permissions=["clipboard-read", "clipboard-write"])
 
+    print("visibility")
+    page = ctx.new_page()
+    for q, want, reason in [("", False, "webdriver"), ("?directedit=off", False, "url"), ("?directedit=on", True, None)]:
+        page.goto("http://localhost:4174/" + q)
+        page.wait_for_selector("h1")
+        page.wait_for_timeout(300)
+        present = page.locator("directedit-ui").count() > 0
+        got = page.evaluate("() => window.__directedit && window.__directedit.reason || null")
+        check(present == want and got == reason, f"{q or '(no param, automated browser)'}: editor {'shown' if want else 'hidden'}")
+    page.close()
+
     cases = [
-        ("react", "http://localhost:4173/", lambda pg: [
+        ("react", "http://localhost:4173/?directedit=on", lambda pg: [
             edit_inline(pg, pg.locator("h1"), "Tiny tools for shared rooms"),
             edit_inline(pg, pg.locator("nav a").first, "Read the long essay"),
         ], [("examples/react/src/App.jsx", "<h1>Tiny tools for shared rooms</h1>"),
             ("examples/react/src/App.jsx", "label: 'Read the long essay'")]),
-        ("html", "http://localhost:4174/", lambda pg: [
+        ("html", "http://localhost:4174/?directedit=on", lambda pg: [
             edit_inline(pg, pg.locator("h1"), "A hand-made HTML page"),
         ], [("examples/html/index.html", "<h1>A hand-made HTML page</h1>")]),
-        ("astro", "http://localhost:4175/", lambda pg: [
+        ("astro", "http://localhost:4175/?directedit=on", lambda pg: [
             edit_inline(pg, pg.locator("body > h1"), "Astro example 🌳"),
             edit_inline(pg, pg.locator("article h2"), "Things I build"),
         ], [("examples/astro/src/pages/index.astro", "<h1>Astro example 🌳</h1>"),

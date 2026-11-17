@@ -46,14 +46,14 @@ with sync_playwright() as p:
     errors = []
     page.on("console", lambda m: m.type == "error" and "favicon" not in (m.location or {}).get("url", "") and errors.append(m.text))
     page.on("pageerror", lambda e: errors.append(str(e)))
-    page.goto("http://localhost:5171/")
+    page.goto("http://localhost:5171/?directedit=on")
     page.wait_for_selector("h1")
     page.keyboard.press("Alt+e")
     check(page.evaluate("document.documentElement.hasAttribute('data-de-on')"), "Alt+E turns edit mode on")
 
     edit_inline(page, page.locator("h1"), "Tiny tools for shared rooms")
     edit_inline(page, page.locator("nav a").first, "Read the long essay")
-    check(page.url == "http://localhost:5171/", "clicking a link in edit mode does not navigate")
+    check(page.url == "http://localhost:5171/?directedit=on", "clicking a link in edit mode does not navigate")
     edit_popover(page, page.locator("main button.btn"), "Get on the list")
     check(page.locator("main span").inner_text() == "0 joined", "button onClick suppressed in edit mode")
     # caret edit inside a paragraph that also contains an expression ({name})
@@ -85,7 +85,7 @@ with sync_playwright() as p:
     page = browser.new_page()
     dialogs = []
     page.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
-    page.goto("http://localhost:5172/")
+    page.goto("http://localhost:5172/?directedit=on")
     page.wait_for_selector("h1")
     page.locator("directedit-ui").locator(".pill").click()
     lede = page.locator("p.lede")
@@ -112,7 +112,7 @@ with sync_playwright() as p:
     # ---------------------------------------------------------------- Astro
     print("astro")
     page = browser.new_page()
-    page.goto("http://localhost:4321/")
+    page.goto("http://localhost:4321/?directedit=on")
     page.wait_for_selector("h1")
     page.keyboard.press("Alt+e")
     edit_inline(page, page.locator("body > h1"), "Astro example 🌳")
@@ -133,7 +133,7 @@ with sync_playwright() as p:
     # ---------------------------------------------------------------- queue
     print("queue")
     page = browser.new_page()
-    page.goto("http://localhost:5171/")
+    page.goto("http://localhost:5171/?directedit=on")
     page.wait_for_selector("h1")
     page.keyboard.press("Alt+e")
     edit_inline(page, page.locator("main span"), "1 joined")  # "{count} joined" — dynamic

@@ -142,6 +142,20 @@ Editing adds no visual chrome: the text keeps its exact layout (wrapping, spacin
 
 Removing an element writes the removal to source when the element is plain markup that appears once on the page. Anything produced by code (a component's root element, a condition, a list item rendered from data) goes to `.directedits.md` instead, with the reason.
 
+### Hiding it (screenshots, automated browsers)
+
+The editor stays out of the way in these cases:
+
+- **Automated browsers.** Playwright, Puppeteer and Selenium set `navigator.webdriver`, so pages they load don't show it. Add `?directedit=on` to the URL to bring it back, e.g. for an agent that edits copy through a browser.
+- **`?directedit=off`** hides it for that page load, on dev servers and previews alike.
+- **One CSS rule.** Everything directedit draws lives in a single `<directedit-ui>` element, which also carries a `data-directedit` attribute:
+
+  ```css
+  directedit-ui { display: none !important; }
+  ```
+
+When it's hidden this way, `window.__directedit` is `{ disabled: true, reason: 'url' | 'webdriver' }`.
+
 ## How it maps back to source
 
 In dev, every element gets a `data-de-src="file:line:col"` attribute (Astro already emits `data-astro-source-file`/`-loc`, which are used as-is). When you save, each changed text node is matched to a literal, widening the search until exactly one matches:

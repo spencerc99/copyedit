@@ -6,6 +6,14 @@
 
 export function init(config = {}) {
   if (typeof window === 'undefined' || window.__directedit) return;
+  // Stay out of screenshots and automated runs: ?directedit=off hides it for this page load,
+  // and browsers driven by automation (navigator.webdriver: Playwright, Puppeteer, Selenium)
+  // don't get it unless the URL asks for it with ?directedit=on.
+  const off = disabledReason();
+  if (off) {
+    window.__directedit = { disabled: true, reason: off };
+    return;
+  }
   const api = config.api || '/__directedit';
   const queueFile = config.queueFile || '.directedits.md';
   // 'dev': Save writes to source through the dev server. 'preview': a deployed preview build
@@ -29,6 +37,7 @@ export function init(config = {}) {
   // ------------------------------------------------------------------ UI
 
   const host = document.createElement('directedit-ui');
+  host.setAttribute('data-directedit', '');
   host.style.cssText = 'all: initial; position: fixed; z-index: 2147483647; inset: 0 auto auto 0; width: 0; height: 0;';
   const shadow = host.attachShadow({ mode: 'open' });
   shadow.innerHTML = `
@@ -90,6 +99,7 @@ export function init(config = {}) {
   };
 
   const pageStyle = document.createElement('style');
+  pageStyle.setAttribute('data-directedit', '');
   pageStyle.textContent = `
 html[data-de-on] body, html[data-de-on] body * { cursor: text !important; }
 [data-de-editing], [data-de-editing]:focus, [data-de-editing]:focus-visible { outline: none !important; }
@@ -790,4 +800,13 @@ export function formatApplyCommand(payload) {
   const json = JSON.stringify(head).slice(0, -1) + ',"edits":[\n' + edits.map((e) => '  ' + JSON.stringify(e)).join(',\n') + '\n]}';
   return `Apply ${n} copy edit${n === 1 ? '' : 's'} from ${where}. Run this command exactly as written from the repo root, then handle only the edits it reports as queued.\n\n`
     + `npx directedit apply <<'DIRECTEDIT'\n${json}\nDIRECTEDIT\n`;
+}
+
+function disabledReason() {
+  let flag = null;
+  try { flag = new URLSearchParams(location.search).get('directedit'); } catch {}
+  if (flag === 'off' || flag === '0' || flag === 'false') return 'url';
+  if (flag === 'on' || flag === '1' || flag === 'true') return null;
+  try { if (navigator.webdriver) return 'webdriver'; } catch {}
+  return null;
 }
